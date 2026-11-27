@@ -67,6 +67,39 @@ def drive_download(token,file_id,dest):
    with open(dest,'wb') as f:
     for b in r.iter_bytes():f.write(b)
   return meta.get('name','Google Drive video')
+  
+def youtube_download(url, dest):
+    p = urlparse(url)
+
+    allowed_hosts = (
+        'youtube.com',
+        'www.youtube.com',
+        'm.youtube.com',
+        'youtu.be',
+        'www.youtube-nocookie.com'
+    )
+
+    if p.scheme != 'https' or p.hostname not in allowed_hosts:
+        raise RuntimeError('Please provide a valid YouTube URL.')
+
+    dest = str(dest)
+
+    run([
+        'python', '-m', 'yt_dlp',
+        '--no-playlist',
+        '--no-warnings',
+        '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        '--merge-output-format', 'mp4',
+        '--max-filesize', f'{MAX_MB}M',
+        '-o', dest,
+        url
+    ])
+
+    if not os.path.exists(dest):
+        raise RuntimeError('YouTube video download failed.')
+
+    return 'YouTube video'
+ 
 HOOK=re.compile(r'\b(wow|wait|what|no way|insane|crazy|unbelievable|oh my god|lets go|finally|secret|never|best|worst|amazing|clutch|fail|win|impossible|bro|watch this|actually)\b',re.I)
 def transcribe(path,language):
  from faster_whisper import WhisperModel
