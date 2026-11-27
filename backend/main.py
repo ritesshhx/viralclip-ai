@@ -238,3 +238,151 @@ def download(jid:str):
  p=JOBS/jid/'viralclip-ai-clips.zip'
  if not p.exists():raise HTTPException(404,'ZIP not ready')
  return FileResponse(p,media_type='application/zip',filename='viralclip-ai-clips.zip')
+@app.get("/", response_class=__import__("fastapi.responses", fromlist=["HTMLResponse"]).HTMLResponse)
+def home():
+    from fastapi.responses import HTMLResponse
+
+    return HTMLResponse("""
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ViralClip AI</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101014;color:white;font-family:Arial;padding:22px}
+.container{max-width:600px;margin:auto}
+h1{font-size:32px;color:#a78bfa}
+p{color:#aaa}
+.card{background:#1d1d27;padding:20px;border-radius:16px;margin-top:20px}
+input,select{width:100%;padding:14px;margin:10px 0;background:#292936;color:white;border:1px solid #444;border-radius:9px;font-size:16px}
+button{width:100%;padding:15px;background:#8b5cf6;color:white;border:0;border-radius:9px;font-size:17px;font-weight:bold;margin-top:12px}
+button:disabled{opacity:.5}
+video{width:100%;border-radius:10px;margin-top:12px}
+a{color:#a78bfa}
+#status{margin-top:18px;color:#c4b5fd}
+.clip{background:#292936;padding:14px;border-radius:12px;margin-top:15px}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>⚡ ViralClip AI</h1>
+<p>Turn long videos into viral Shorts automatically.</p>
+
+<div class="card">
+<h3>🎬 Create your clips</h3>
+
+<form id="clipForm">
+<input name="url" type="url" placeholder="Paste YouTube video link" required>
+
+<label>Number of clips</label>
+<select name="count">
+<option value="20">20 clips</option>
+<option value="10">10 clips</option>
+<option value="5">5 clips</option>
+</select>
+
+<label>Clip duration</label>
+<select name="duration">
+<option value="30">30 seconds</option>
+<option value="15">15 seconds</option>
+<option value="60">60 seconds</option>
+</select>
+
+<label>Video format</label>
+<select name="aspect">
+<option value="9:16">9:16 Shorts / Reels</option>
+<option value="1:1">1:1 Square</option>
+<option value="16:9">16:9 Landscape</option>
+</select>
+
+<button id="generate">🚀 Generate Clips</button>
+</form>
+
+<div id="status"></div>
+<div id="results"></div>
+</div>
+</div>
+
+<script>
+const form=document.getElementById('clipForm');
+const statusBox=document.getElementById('status');
+const results=document.getElementById('results');
+const button=document.getElementById('generate');
+
+form.addEventListener('submit',async(e)=>{
+e.preventDefault();
+button.disabled=true;
+results.innerHTML='';
+statusBox.textContent='Starting your AI job...';
+
+try{
+const response=await fetch('/api/jobs/youtube',{
+method:'POST',
+body:new FormData(form)
+});
+const job=await response.json();
+if(!response.ok) throw new Error(job.detail || 'Could not start job');
+
+statusBox.textContent='Job started. Preparing video...';
+
+async function check(){
+const r=await fetch('/api/jobs/'+job.job_id);
+const data=await r.json();
+
+statusBox.textContent=data.message+' ('+data.progress+'%)';
+
+if(data.status==='failed'){
+throw new Error(data.error || 'Processing failed');
+}
+
+if(data.status==='ready'){
+let clips=typeof data.clips==='string'?JSON.parse(data.clips):data.clips;
+
+results.innerHTML='<h3>🎉 Your clips are ready!</h3>';
+
+clips.forEach(c=>{
+const item=document.createElement('div');
+item.className='clip';
+const title=document.createElement('p');
+title.textContent=c.title || 'Highlight';
+const video=document.createElement('video');
+video.controls=true;
+video.src=c.preview;
+const link=document.createElement('a');
+link.href=c.preview;
+link.download=c.file;
+link.textContent='⬇ Download clip';
+item.append(title,video,document.createElement('br'),link);
+results.appendChild(item);
+});
+
+const zip=document.createElement('a');
+zip.href='/api/jobs/'+job.job_id+'/download';
+zip.textContent='⬇ Download all clips (ZIP)';
+zip.style.display='block';
+zip.style.marginTop='20px';
+results.appendChild(zip);
+
+button.disabled=false;
+return;
+}
+
+setTimeout(()=>check().catch(fail),3000);
+}
+function fail(error){
+statusBox.textContent='Error: '+error.message;
+button.disabled=false;
+}
+check().catch(fail);
+
+}catch(error){
+statusBox.textContent='Error: '+error.message;
+button.disabled=false;
+}
+});
+</script>
+</body>
+</html>
+""")
+ 
