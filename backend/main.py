@@ -190,6 +190,38 @@ async def upload(bg:BackgroundTasks,file:UploadFile=File(...),count:int=Form(20)
    if size>MAX_MB*1024*1024:raise HTTPException(413,'Video exceeds upload size limit.')
    f.write(chunk)
  bg.add_task(process,jid,path,file.filename,s);return {'job_id':jid,'status':'queued'}
+ 
+@app.post('/api/jobs/youtube')
+def from_youtube(
+    bg: BackgroundTasks,
+    url: str = Form(...),
+    count: int = Form(20),
+    duration: int = Form(30),
+    aspect: str = Form('9:16'),
+    quality: str = Form('1080'),
+    captions: bool = Form(True),
+    language: str = Form('Auto detect')
+):
+    s = settings(count, duration, aspect, quality, captions, language)
+    jid = newjob(s, 'YouTube video')
+
+    def task():
+        path = JOBS / jid / 'source_video.mp4'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            name = youtube_download(url, path)
+            process(jid, path, name, s)
+        except Exception as e:
+            update(
+                jid,
+                status='failed',
+                message='YouTube download or processing failed.',
+                error=str(e)
+            )
+
+    bg.add_task(task)
+    return {'job_id': jid, 'status': 'queued'}
+ 
 @app.get('/api/jobs/{jid}')
 def status(jid:str):
  with conn() as c:r=c.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone()
