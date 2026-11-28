@@ -328,7 +328,7 @@ a{color:#a78bfa}
 <h3>🎬 Create your clips</h3>
 
 
-<form id="clipForm" onsubmit="return false;">
+<form id="clipForm">
   <label>Upload your video</label>
   <input type="file" name="file" accept="video/*" required>
 
