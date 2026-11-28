@@ -381,103 +381,159 @@ a{color:#a78bfa}
 </div>
 </div>
 
+
 <script>
-const form=document.getElementById('clipForm');
-const statusBox=document.getElementById('status');
-const results=document.getElementById('results');
-const button=document.getElementById('generate');
+const form = document.getElementById('clipForm');
+const statusBox = document.getElementById('status');
+const results = document.getElementById('results');
+const button = document.getElementById('generate');
 
-form.addEventListener('submit',async(e)=>{
-e.preventDefault();
-button.disabled=true;
-results.innerHTML='';
-statusBox.textContent='Starting your AI job...';
+form.addEventListener('submit', async function(e) {
+    e.preventDefault();
 
-try{
+    const fileInput = form.querySelector('input[name="file"]');
+    if (!fileInput.files.length) {
+        statusBox.textContent = 'Please choose a video first.';
+        return;
+    }
 
-const mode=document.getElementById('mode').value;
-const timings=document.getElementById('manualTimes').value;
+    button.disabled = true;
+    results.innerHTML = '';
+    statusBox.textContent = 'Uploading your video...';
 
-const toSeconds=(value)=>{
-  const parts=value.trim().split(':').map(Number);
-  if(parts.some(Number.isNaN)) throw new Error('Invalid time format');
-  return parts.reduce((total,part)=>total*60+part,0);
-};
+    try {
+        const mode = document.getElementById('mode').value;
+        const formData = new FormData(form);
 
-const ranges=timings.split('\n').filter(line=>line.trim()).map(line=>{
-  const parts=line.split('-').map(x=>x.trim());
-  if(parts.length!==2) throw new Error('Use start - end for each clip');
-  return {start:toSeconds(parts[0]),end:toSeconds(parts[1])};
-});
+        let ranges = [];
 
-document.getElementById('manualRanges').value=JSON.stringify(ranges);
+        if (mode === 'manual') {
+            const timings = document.getElementById('manualTimes').value.trim();
 
-const response=await fetch('/api/jobs/upload',{
+            if (!timings) {
+                throw new Error('Enter at least one manual clip timing.');
+            }
 
-method:'POST',
-body:new FormData(form)
-});
-const job=await response.json();
-if(!response.ok) throw new Error(job.detail || 'Could not start job');
+            function toSeconds(value) {
+                const parts = value.trim().split(':').map(Number);
+                if (parts.some(Number.isNaN) || parts.length < 2 || parts.length > 3) {
+                    throw new Error('Use MM:SS or HH:MM:SS format.');
+                }
+                return parts.reduce((total, part) => total * 60 + part, 0);
+            }
 
-statusBox.textContent='Job started. Preparing video...';
+            ranges = timings.split('\n')
+                .filter(line => line.trim())
+                .map(line => {
+                    const parts = line.split('-').map(x => x.trim());
+                    if (parts.length !== 2) {
+                        throw new Error('Use one start and end time per line.');
+                    }
 
-async function check(){
-const r=await fetch('/api/jobs/'+job.job_id);
-const data=await r.json();
+                    const start = toSeconds(parts[0]);
+                    const end = toSeconds(parts[1]);
 
-statusBox.textContent=data.message+' ('+data.progress+'%)';
+                    if (end <= start) {
+                        throw new Error('End time must be after start time.');
+                    }
 
-if(data.status==='failed'){
-throw new Error(data.error || 'Processing failed');
-}
+                    return { start, end };
+                });
+        }
 
-if(data.status==='ready'){
-let clips=typeof data.clips==='string'?JSON.parse(data.clips):data.clips;
+        formData.set('manual_ranges', JSON.stringify(ranges));
 
-results.innerHTML='<h3>🎉 Your clips are ready!</h3>';
+        statusBox.textContent = 'Uploading video and starting AI processing...';
 
-clips.forEach(c=>{
-const item=document.createElement('div');
-item.className='clip';
-const title=document.createElement('p');
-title.textContent=c.title || 'Highlight';
-const video=document.createElement('video');
-video.controls=true;
-video.src=c.preview;
-const link=document.createElement('a');
-link.href=c.preview;
-link.download=c.file;
-link.textContent='⬇ Download clip';
-item.append(title,video,document.createElement('br'),link);
-results.appendChild(item);
-});
+        const response = await fetch('/api/jobs/upload', {
+            method: 'POST',
+            body: formData
+        });
 
-const zip=document.createElement('a');
-zip.href='/api/jobs/'+job.job_id+'/download';
-zip.textContent='⬇ Download all clips (ZIP)';
-zip.style.display='block';
-zip.style.marginTop='20px';
-results.appendChild(zip);
+        const job = await response.json();
 
-button.disabled=false;
-return;
-}
+        if (!response.ok) {
+            throw new Error(job.detail || 'Upload failed.');
+        }
 
-setTimeout(()=>check().catch(fail),3000);
-}
-function fail(error){
-statusBox.textContent='Error: '+error.message;
-button.disabled=false;
-}
-check().catch(fail);
+        if (!job.job_id) {
+            throw new Error('The server did not return a job ID.');
+        }
 
-}catch(error){
-statusBox.textContent='Error: '+error.message;
-button.disabled=false;
-}
+        statusBox.textContent = 'Video uploaded. AI is finding highlights...';
+
+        async function checkJob() {
+            const r = await fetch('/api/jobs/' + encodeURIComponent(job.job_id));
+            const data = await r.json();
+
+            if (!r.ok) {
+                throw new Error(data.detail || 'Could not check job status.');
+            }
+
+            statusBox.textContent =
+                (data.message || 'Processing video...') +
+                ' (' + (data.progress || 0) + '%)';
+
+            if (data.status === 'failed') {
+                throw new Error(data.error || data.message || 'Processing failed.');
+            }
+
+            if (data.status !== 'ready') {
+                setTimeout(() => checkJob().catch(showError), 3000);
+                return;
+            }
+
+            let clips = typeof data.clips === 'string'
+                ? JSON.parse(data.clips)
+                : data.clips;
+
+            results.innerHTML = '<h3>🎉 Your clips are ready!</h3>';
+
+            clips.forEach(c => {
+                const item = document.createElement('div');
+                item.className = 'clip';
+
+                const title = document.createElement('p');
+                title.textContent = c.title || 'Highlight';
+
+                const video = document.createElement('video');
+                video.controls = true;
+                video.src = c.preview;
+
+                const link = document.createElement('a');
+                link.href = c.preview;
+                link.download = c.file;
+                link.textContent = '⬇ Download clip';
+
+                item.append(title, video, document.createElement('br'), link);
+                results.appendChild(item);
+            });
+
+            const zip = document.createElement('a');
+            zip.href = '/api/jobs/' + encodeURIComponent(job.job_id) + '/download';
+            zip.textContent = '⬇ Download all clips (ZIP)';
+            zip.style.display = 'block';
+            zip.style.marginTop = '20px';
+            results.appendChild(zip);
+
+            statusBox.textContent = clips.length + ' clips ready!';
+            button.disabled = false;
+        }
+
+        function showError(error) {
+            statusBox.textContent = 'Error: ' + error.message;
+            button.disabled = false;
+        }
+
+        setTimeout(() => checkJob().catch(showError), 3000);
+
+    } catch (error) {
+        statusBox.textContent = 'Error: ' + error.message;
+        button.disabled = false;
+    }
 });
 </script>
+
 </body>
 </html>
 """)
