@@ -422,7 +422,7 @@ form.addEventListener('submit', async function(e) {
                 return parts.reduce((total, part) => total * 60 + part, 0);
             }
 
-            ranges = timings.split('\n')
+            ranges = timings.split('\\n')
                 .filter(line => line.trim())
                 .map(line => {
                     const parts = line.split('-').map(x => x.trim());
