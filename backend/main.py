@@ -211,22 +211,42 @@ async def from_cloud(bg:BackgroundTasks,url:str=Form(...),count:int=Form(20),dur
   try:await cloud_download(url,path);process(jid,path,'Authorized cloud storage',s)
   except Exception as e:update(jid,status='failed',message='Could not import cloud video.',error=str(e))
  bg.add_task(task);return {'job_id':jid,'status':'queued'}
-@app.post('/api/jobs/upload')
 
-async def upload(bg:BackgroundTasks,file:UploadFile=File(...),count:int=Form(20),duration:int=Form(30),aspect:str=Form('9:16'),quality:str=Form('1080'),captions:bool=Form(True),language:str=Form('Auto detect'),mode:str=Form('automatic'),manual_ranges:str=Form('[]')):
  
- if not file.filename.lower().endswith(('.mp4','.mov','.mkv','.webm')):raise HTTPException(400,'Upload MP4, MOV, MKV or WebM.')
- s=settings(count,duration,aspect,quality,captions,language);jid=newjob(s,file.filename);path=JOBS/jid/'source_video';path.parent.mkdir(parents=True,exist_ok=True);size=0
- s['mode'] = mode
-s['manual_ranges'] = manual_ranges
- with open(path,'wb') as f:
-  while chunk:=await file.read(1024*1024):
-   size+=len(chunk)
-   if size>MAX_MB*1024*1024:raise HTTPException(413,'Video exceeds upload size limit.')
-   f.write(chunk)
- bg.add_task(process,jid,path,file.filename,s);return {'job_id':jid,'status':'queued'}
+@app.post('/api/jobs/upload')
+async def upload(
+    bg: BackgroundTasks,
+    file: UploadFile = File(...),
+    count: int = Form(20),
+    duration: int = Form(30),
+    aspect: str = Form('9:16'),
+    quality: str = Form('1080'),
+    captions: bool = Form(True),
+    language: str = Form('Auto detect'),
+    mode: str = Form('auto'),
+    manual_ranges: str = Form('[]')
+):
+    if not file.filename.lower().endswith(('.mp4', '.mov', '.mkv', '.webm')):
+        raise HTTPException(400, 'Upload MP4, MOV, MKV or WebM video.')
+
+    s = settings(count, duration, aspect, quality, captions, language)
+    s['mode'] = mode
+    s['manual_ranges'] = manual_ranges
+
+    jid = newjob(s, file.filename)
+    path = JOBS / jid / 'source_video'
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(path, 'wb') as f:
+        while chunk := await file.read(1024 * 1024):
+            if f.tell() + len(chunk) > MAX_MB * 1024 * 1024:
+                raise HTTPException(413, 'Video exceeds upload size limit.')
+            f.write(chunk)
+
+    bg.add_task(process, jid, path, file.filename, s)
+    return {'job_id': jid, 'status': 'queued'}
  
-@app.post('/api/jobs/youtube')
+
 def from_youtube(
     bg: BackgroundTasks,
     url: str = Form(...),
