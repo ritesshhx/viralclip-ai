@@ -328,7 +328,9 @@ a{color:#a78bfa}
 <h3>🎬 Create your clips</h3>
 
 
-<form id="clipForm">
+
+<form id="clipForm" method="post" action="/api/jobs/upload" enctype="multipart/form-data">
+
   <label>Upload your video</label>
   <input type="file" name="file" accept="video/*" required>
 
