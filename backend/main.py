@@ -130,19 +130,49 @@ def process(jid,source,name,settings):
   if total<10:raise RuntimeError('Video must be longer than 10 seconds.')
   length=min(settings['duration'],int(total)); update(jid,progress=15,message='Transcribing with local Whisper tiny model…')
   segs=transcribe(source,settings.get('language')); update(jid,progress=35,message='Ranking candidate moments…')
-  moments=select_clips(segs,total,settings['count'],length); clips=[]
+  moments=manual_clip_ranges(settings.get('manual_ranges'),total) if settings.get('mode')=='manual' else select_clips(segs,total,settings['count'],length); clips=[]
   for i,m in enumerate(moments):
    filename=f'clip_{i+1:02d}.mp4'; out=work/filename; start=m['start']
    if settings['aspect']=='9:16':vf='scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920'
    elif settings['aspect']=='1:1':vf='scale=1080:1080:force_original_aspect_ratio=increase,crop=1080:1080'
    else:vf='scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2'
-   run(['ffmpeg','-y','-ss',str(start),'-i',str(source),'-t',str(min(settings['duration'],total-start)),'-vf',vf,'-c:v','libx264','-preset','veryfast','-crf','23','-c:a','aac','-b:a','128k','-movflags','+faststart',str(out)])
+   run(['ffmpeg','-y','-ss',str(start),'-i',str(source),
+'-t',str(min(m.get('end',start+settings['duration'])-start,total-start)),
+        
    clips.append({**m,'id':i+1,'file':filename,'approved':False,'preview':f'/api/jobs/{jid}/clips/{filename}'})
    update(jid,progress=40+int(55*(i+1)/len(moments)),message=f'Rendering clip {i+1} of {len(moments)}…',clips=json.dumps(clips))
   with zipfile.ZipFile(work/'viralclip-ai-clips.zip','w',zipfile.ZIP_DEFLATED) as z:
    for x in clips:z.write(work/x['file'],x['file'])
   update(jid,status='ready',progress=100,message=f'{len(clips)} clips ready for review.',clips=json.dumps(clips))
  except Exception as e:update(jid,status='failed',progress=0,message='Processing failed.',error=str(e))
+
+def manual_clip_ranges(raw, total):
+    try:
+        items = json.loads(raw or '[]')
+    except Exception:
+        raise ValueError('Invalid manual clip timings.')
+
+    if not isinstance(items, list) or not items:
+        raise ValueError('Add at least one manual clip.')
+
+    clips = []
+    for item in items:
+        start = float(item['start'])
+        end = float(item['end'])
+
+        if start < 0 or end <= start or end > total:
+            raise ValueError('Invalid clip start or end time.')
+
+        clips.append({
+            'start': round(start, 2),
+            'end': round(end, 2),
+            'title': item.get('title', 'Manual clip'),
+            'score': 0
+        })
+
+    return clips
+
+
 @app.get('/health')
 def health():return {'ok':True,'service':'ViralClip AI API'}
 @app.get('/auth/google')
@@ -183,9 +213,13 @@ async def from_cloud(bg:BackgroundTasks,url:str=Form(...),count:int=Form(20),dur
   except Exception as e:update(jid,status='failed',message='Could not import cloud video.',error=str(e))
  bg.add_task(task);return {'job_id':jid,'status':'queued'}
 @app.post('/api/jobs/upload')
-async def upload(bg:BackgroundTasks,file:UploadFile=File(...),count:int=Form(20),duration:int=Form(30),aspect:str=Form('9:16'),quality:str=Form('1080'),captions:bool=Form(True),language:str=Form('Auto detect')):
+
+async def upload(bg:BackgroundTasks,file:UploadFile=File(...),count:int=Form(20),duration:int=Form(30),aspect:str=Form('9:16'),quality:str=Form('1080'),captions:bool=Form(True),language:str=Form('Auto detect'),mode:str=Form('automatic'),manual_ranges:str=Form('[]')):
+ 
  if not file.filename.lower().endswith(('.mp4','.mov','.mkv','.webm')):raise HTTPException(400,'Upload MP4, MOV, MKV or WebM.')
  s=settings(count,duration,aspect,quality,captions,language);jid=newjob(s,file.filename);path=JOBS/jid/'source_video';path.parent.mkdir(parents=True,exist_ok=True);size=0
+ s['mode'] = mode
+s['manual_ranges'] = manual_ranges
  with open(path,'wb') as f:
   while chunk:=await file.read(1024*1024):
    size+=len(chunk)
@@ -274,32 +308,54 @@ a{color:#a78bfa}
 <div class="card">
 <h3>🎬 Create your clips</h3>
 
+
 <form id="clipForm">
-<input name="url" type="url" placeholder="Paste YouTube video link" required>
+  <label>Upload your video</label>
+  <input type="file" name="file" accept="video/*" required>
 
-<label>Number of clips</label>
-<select name="count">
-<option value="20">20 clips</option>
-<option value="10">10 clips</option>
-<option value="5">5 clips</option>
-</select>
+  <label>Clipping mode</label>
+  <select name="mode" id="mode">
+    <option value="automatic">Automatic AI highlights</option>
+    <option value="manual">Manual clip timings</option>
+  </select>
 
-<label>Clip duration</label>
-<select name="duration">
-<option value="30">30 seconds</option>
-<option value="15">15 seconds</option>
-<option value="60">60 seconds</option>
-</select>
+  <div id="automaticSettings">
+    <label>Number of clips</label>
+    <select name="count">
+      <option value="20">20 clips</option>
+      <option value="10">10 clips</option>
+      <option value="5">5 clips</option>
+    </select>
 
-<label>Video format</label>
-<select name="aspect">
-<option value="9:16">9:16 Shorts / Reels</option>
-<option value="1:1">1:1 Square</option>
-<option value="16:9">16:9 Landscape</option>
-</select>
+    <label>Automatic clip duration</label>
+    <select name="duration">
+      <option value="15">15 seconds</option>
+      <option value="30" selected>30 seconds</option>
+      <option value="45">45 seconds</option>
+      <option value="60">60 seconds</option>
+      <option value="90">90 seconds</option>
+      <option value="120">2 minutes</option>
+    </select>
+  </div>
 
-<button id="generate">🚀 Generate Clips</button>
+  <div id="manualSettings" style="display:none">
+    <label>Manual clip timings</label>
+    <textarea id="manualTimes" rows="6"
+      placeholder="One clip per line:&#10;00:20 - 00:55&#10;02:10 - 03:05&#10;05:30 - 06:15"></textarea>
+    <input type="hidden" name="manual_ranges" id="manualRanges" value="[]">
+    <p>Enter each clip's start and end time. Format: MM:SS or HH:MM:SS.</p>
+  </div>
+
+  <label>Video format</label>
+  <select name="aspect">
+    <option value="9:16">9:16 Shorts / Reels</option>
+    <option value="1:1">1:1 Square</option>
+    <option value="16:9">16:9 Landscape</option>
+  </select>
+
+  <button id="generate" type="submit">🚀 Generate Clips</button>
 </form>
+
 
 <div id="status"></div>
 <div id="results"></div>
@@ -319,7 +375,26 @@ results.innerHTML='';
 statusBox.textContent='Starting your AI job...';
 
 try{
-const response=await fetch('/api/jobs/youtube',{
+
+const mode=document.getElementById('mode').value;
+const timings=document.getElementById('manualTimes').value;
+
+const toSeconds=(value)=>{
+  const parts=value.trim().split(':').map(Number);
+  if(parts.some(Number.isNaN)) throw new Error('Invalid time format');
+  return parts.reduce((total,part)=>total*60+part,0);
+};
+
+const ranges=timings.split('\n').filter(line=>line.trim()).map(line=>{
+  const parts=line.split('-').map(x=>x.trim());
+  if(parts.length!==2) throw new Error('Use start - end for each clip');
+  return {start:toSeconds(parts[0]),end:toSeconds(parts[1])};
+});
+
+document.getElementById('manualRanges').value=JSON.stringify(ranges);
+
+const response=await fetch('/api/jobs/upload',{
+
 method:'POST',
 body:new FormData(form)
 });
