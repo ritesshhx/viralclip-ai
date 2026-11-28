@@ -136,8 +136,7 @@ def process(jid,source,name,settings):
    if settings['aspect']=='9:16':vf='scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920'
    elif settings['aspect']=='1:1':vf='scale=1080:1080:force_original_aspect_ratio=increase,crop=1080:1080'
    else:vf='scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2'
-   run(['ffmpeg','-y','-ss',str(start),'-i',str(source),
-'-t',str(min(m.get('end',start+settings['duration'])-start,total-start)),
+   run(['ffmpeg','-y','-ss',str(start),'-i',str(source),'-t',str(max(0.1,min(m.get('end',start+settings['duration']),total)-start)),'-vf',vf,'-c:v','libx264','-preset','veryfast','-crf','23','-c:a','aac','-b:a','128k','-movflags','+faststart',str(out)])
         
    clips.append({**m,'id':i+1,'file':filename,'approved':False,'preview':f'/api/jobs/{jid}/clips/{filename}'})
    update(jid,progress=40+int(55*(i+1)/len(moments)),message=f'Rendering clip {i+1} of {len(moments)}…',clips=json.dumps(clips))
